@@ -1,0 +1,20 @@
+{
+  "name": "conventions-adversary",
+  "version": "0.0.1",
+  "description": "Evidence-backed review of declared and inferred repository conventions.",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && node scripts/build.mjs",
+    "test": "npm run build"
+  },
+  "dependencies": {
+    "@adversarylabs/sdk": "0.1.17"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.3"
+  }
+}
