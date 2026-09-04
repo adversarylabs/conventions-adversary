@@ -67,9 +67,9 @@ jobs:
 
       - name: Push adversary
         id: push
-        uses: adversarylabs/actions/push@e28f2dd6e94bc7df79bdd53d8f0452e65031f0b1
+        uses: adversarylabs/actions/push@bba2c42901c78149c38642a0b7bfa957e3feb0b7 # v1.4.0
         with:
-          cli-version: 2026.8.27-beta.2
+          cli-version: 2026.9.4-beta.2
           path: .
           token: ${{ secrets.ADVERSARY_SERVICE_ACCOUNT_TOKEN }}
           remote-reference: registry.adversarylabs.ai/${{ steps.version.outputs.name }}:${{ steps.version.outputs.version }}
@@ -96,7 +96,7 @@ jobs:
             echo "push action did not output reference/digest" >&2
             exit 1
           fi
-          GOBIN="${RUNNER_TEMP}/bin" go install github.com/adversarylabs/adversary@main
+          GOBIN="${RUNNER_TEMP}/bin" go install github.com/adversarylabs/adversary@2026.9.4-beta.2
           export PATH="${RUNNER_TEMP}/bin:$PATH"
           printf '%s\n' "$ADVERSARY_SERVICE_ACCOUNT_TOKEN" | adversary login --token-stdin --profile sign --registry-namespace adversarylabs
           trap 'adversary --profile sign logout --local-only >/dev/null 2>&1 || true' EXIT
