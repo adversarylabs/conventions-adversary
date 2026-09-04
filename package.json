@@ -10,7 +10,7 @@
     "test": "npm run build"
   },
   "dependencies": {
-    "@adversarylabs/sdk": "0.1.17"
+    "@adversarylabs/sdk": "0.1.18"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
