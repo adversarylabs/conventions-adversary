@@ -16391,26 +16391,35 @@ async function parseInput(path = DEFAULT_INPUT_PATH) {
     if (!isRecord(parsed.change)) {
       throw new Error(`Invalid input at ${path}: change must be an object or null.`);
     }
-    for (const field of ["type", "base_ref", "head_ref", "scan_mode"]) {
-      const value = parsed.change[field];
-      if (value !== void 0 && typeof value !== "string") {
-        throw new Error(`Invalid input at ${path}: change.${field} must be a string.`);
-      }
-    }
-    const scanMode = parsed.change.scan_mode;
-    if (scanMode !== void 0 && scanMode !== "changed" && scanMode !== "all") {
-      throw new Error(`Invalid input at ${path}: change.scan_mode must be "changed" or "all".`);
-    }
-    const changedFiles = parsed.change.changed_files;
-    if (changedFiles !== void 0 && (!Array.isArray(changedFiles) || changedFiles.some((item) => typeof item !== "string"))) {
-      throw new Error(`Invalid input at ${path}: change.changed_files must be an array of strings.`);
-    }
-    const changedRanges = parsed.change.changed_ranges;
-    if (changedRanges !== void 0 && (!Array.isArray(changedRanges) || changedRanges.some((item) => !isRecord(item) || typeof item.path !== "string" || item.path.length === 0 || !Number.isInteger(item.startLine) || !Number.isInteger(item.endLine) || item.startLine < 1 || item.endLine < item.startLine))) {
-      throw new Error(`Invalid input at ${path}: change.changed_ranges must contain valid path/startLine/endLine ranges.`);
-    }
+    validateRuntimeChange(parsed.change, path);
   }
   return parsed;
+}
+function validateRuntimeChange(change, inputPath) {
+  for (const field of ["type", "base_ref", "head_ref", "scan_mode"]) {
+    const value = change[field];
+    if (value !== void 0 && typeof value !== "string") {
+      throw new Error(`Invalid input at ${inputPath}: change.${field} must be a string.`);
+    }
+  }
+  const scanMode = change.scan_mode;
+  if (scanMode !== void 0 && scanMode !== "changed" && scanMode !== "all") {
+    throw new Error(`Invalid input at ${inputPath}: change.scan_mode must be "changed" or "all".`);
+  }
+  const changedFiles = change.changed_files;
+  if (changedFiles !== void 0 && (!Array.isArray(changedFiles) || changedFiles.some((item) => typeof item !== "string"))) {
+    throw new Error(`Invalid input at ${inputPath}: change.changed_files must be an array of strings.`);
+  }
+  const changedRanges = change.changed_ranges;
+  if (changedRanges !== void 0 && (!Array.isArray(changedRanges) || !changedRanges.every(isValidChangedRange))) {
+    throw new Error(`Invalid input at ${inputPath}: change.changed_ranges must contain valid path/startLine/endLine ranges.`);
+  }
+}
+function isValidChangedRange(value) {
+  if (!isRecord(value))
+    return false;
+  const { path, startLine, endLine } = value;
+  return typeof path === "string" && path.length > 0 && typeof startLine === "number" && Number.isInteger(startLine) && startLine >= 1 && typeof endLine === "number" && Number.isInteger(endLine) && endLine >= startLine;
 }
 async function writeOutput(output, path = DEFAULT_OUTPUT_PATH) {
   await validateRunEnvelope(output);
@@ -16469,18 +16478,13 @@ function normalizeChangeContext(change) {
   if (scanMode !== "changed" && scanMode !== "all") {
     throw new Error(`Unsupported change scan_mode "${change.scan_mode}".`);
   }
-  const changedRanges = Object.freeze((change.changed_ranges ?? []).map((range) => Object.freeze({
-    path: range.path,
-    startLine: range.startLine,
-    endLine: range.endLine
-  })));
   return Object.freeze({
     ...change.type === void 0 ? {} : { type: change.type },
     ...change.base_ref === void 0 ? {} : { baseRef: change.base_ref },
     ...change.head_ref === void 0 ? {} : { headRef: change.head_ref },
     scanMode,
     changedFiles: Object.freeze([...change.changed_files ?? []]),
-    changedRanges,
+    changedRanges: freezeChangedRanges(change.changed_ranges),
     worktree: change.head_ref === WORKTREE_HEAD_REF
   });
 }
@@ -16488,8 +16492,14 @@ function isChangedLine(change, path, line) {
   if (change === null || !Number.isInteger(line) || line < 1) {
     return false;
   }
-  const normalizedPath = path.replaceAll("\\", "/").replace(/^\.\//, "");
-  return change.changedRanges.some((range) => range.path.replaceAll("\\", "/").replace(/^\.\//, "") === normalizedPath && line >= range.startLine && line <= range.endLine);
+  const normalizedPath = normalizeRepositoryPath(path);
+  return change.changedRanges.some((range) => normalizeRepositoryPath(range.path) === normalizedPath && line >= range.startLine && line <= range.endLine);
+}
+function freezeChangedRanges(ranges) {
+  return Object.freeze((ranges ?? []).map((range) => Object.freeze({ ...range })));
+}
+function normalizeRepositoryPath(path) {
+  return path.replaceAll("\\", "/").replace(/^\.\//, "");
 }
 function createRuleContext(repoPath, change, summary, cache, collector, registry, model, repoIndex, repoGraph) {
   const absoluteRepoPath = resolve2(repoPath);
