@@ -10,7 +10,7 @@
     "test": "npm run build"
   },
   "dependencies": {
-    "@adversarylabs/sdk": "0.1.17"
+    "@adversarylabs/sdk": "git+https://github.com/adversarylabs/adversary-sdk-typescript.git#01f4d46ce9d79118f0d6c2d4669ea478c7fbf690"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
