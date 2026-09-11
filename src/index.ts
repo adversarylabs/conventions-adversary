@@ -186,6 +186,7 @@ async function reviewConventions(ctx: RuleContext): Promise<void> {
   ]);
   const mechanicalRules = filterContractRules(declaredContractRules, [
     "format", "quote", "test", "vitest", "jest", "naming", "lint", "build", "file", "suffix",
+    "co-locat", "directory", "adjacent", "alongside", "placement", "path", "folder",
   ]);
   const inferredGroups = chunk(changedSourcePreviews.map((source) => source.path), 2);
   const inferredRequests = inferredGroups.flatMap((focusPaths, groupIndex) =>
@@ -440,8 +441,10 @@ async function loadDeclaredContractSources(
   hints: string[],
 ): Promise<DeclaredContractSource[]> {
   const repositoryRoot = await realpath(ctx.repoPath);
-  const prioritized = [...hints].sort((left, right) =>
-    contractSourcePriority(left) - contractSourcePriority(right) || left.localeCompare(right));
+  // buildConventionSourceHints already ranks by authority and then puts the
+  // nearest applicable policy first. Preserve that order so root-level files
+  // cannot displace a nested AGENTS.md within the bounded source budget.
+  const prioritized = hints;
   const result: DeclaredContractSource[] = [];
   let remainingBytes = 96_000;
 
