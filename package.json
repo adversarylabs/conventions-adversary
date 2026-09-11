@@ -1,6 +1,6 @@
 {
   "name": "conventions-adversary",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Evidence-backed review of declared and inferred repository conventions.",
   "type": "module",
   "private": true,

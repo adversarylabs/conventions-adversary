@@ -17880,7 +17880,7 @@ var repositoryTools = {
 function createApp() {
   const app = new Adversary({
     name: "review/conventions",
-    version: "0.0.2",
+    version: "0.0.3",
     review: { minimumConfidence: "medium" }
   });
   app.rule("conventions.coverage", reviewConventions);

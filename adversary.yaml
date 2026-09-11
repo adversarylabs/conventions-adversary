@@ -1,5 +1,5 @@
 name: adversarylabs/review/conventions
-version: 0.0.2
+version: 0.0.3
 description: Reviews changed code against declared repository rules and well-supported conventions inferred from existing code.
 
 triggers:
