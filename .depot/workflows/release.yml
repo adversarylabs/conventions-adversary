@@ -57,7 +57,7 @@ jobs:
 
       - name: Synchronize release metadata
         id: version
-        uses: adversarylabs/actions/version@f05769343546ba73c1a531e61119b47541d648f5 # v1.4.2
+        uses: adversarylabs/actions/version@v1
         with:
           tag: ${{ github.ref_name }}
           path: .
@@ -67,9 +67,8 @@ jobs:
 
       - name: Push adversary
         id: push
-        uses: adversarylabs/actions/push@f05769343546ba73c1a531e61119b47541d648f5 # v1.4.2
+        uses: adversarylabs/actions/push@v1
         with:
-          cli-version: 2026.9.4
           path: .
           token: ${{ secrets.ADVERSARY_SERVICE_ACCOUNT_TOKEN }}
           remote-reference: registry.adversarylabs.ai/${{ steps.version.outputs.name }}:${{ steps.version.outputs.version }}
