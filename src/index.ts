@@ -153,7 +153,7 @@ const repositoryTools = {
 export function createApp(): Adversary {
   const app = new Adversary({
     name: "review/conventions",
-    version: "0.0.3",
+    version: "0.0.4",
     review: { minimumConfidence: "medium" },
   });
   app.rule("conventions.coverage", reviewConventions);
