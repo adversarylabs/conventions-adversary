@@ -14787,13 +14787,13 @@ var require_dist = __commonJS({
 });
 
 // src/index.ts
-import { lstat as lstat2, readFile as readFile5, realpath as realpath2 } from "node:fs/promises";
+import { lstat as lstat2, readFile as readFile6, realpath as realpath2 } from "node:fs/promises";
 import { resolve as resolve3, sep as sep2 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@adversarylabs/sdk/dist/index.js
 var import__2 = __toESM(require__(), 1);
-import { mkdir, readFile as readFile4, readdir as readdir3, writeFile } from "node:fs/promises";
+import { mkdir, readFile as readFile5, readdir as readdir3, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2 } from "node:path";
 
 // node_modules/@adversarylabs/sdk/dist/model.js
@@ -15135,8 +15135,134 @@ function validateModelOutput(schema, output) {
   }
 }
 
-// node_modules/@adversarylabs/sdk/dist/repo-graph.js
+// node_modules/@adversarylabs/sdk/dist/outcome-context.js
 import { readFile } from "node:fs/promises";
+var ADVERSARY_OUTCOME_CONTEXT_ENV = "ADVERSARY_OUTCOME_CONTEXT";
+var OUTCOME_CONTEXT_SCHEMA_VERSION = "adversary.outcome-context.v1";
+var OUTCOME_CONTEXT_MAX_SOURCE_CHARACTERS = 32 << 10;
+var OUTCOME_CONTEXT_MAX_FILE_BYTES = 384 << 10;
+var MAX_PROVIDER_CHARACTERS = 100;
+var MAX_REPOSITORY_CHARACTERS = 500;
+var MAX_INTENT_TEXT_CHARACTERS = 500;
+async function openOutcomeContext(path) {
+  const raw = await readFile(path, "utf8");
+  if (Buffer.byteLength(raw) > OUTCOME_CONTEXT_MAX_FILE_BYTES) {
+    throw new Error(`Invalid outcome context at ${path}: file is too large.`);
+  }
+  return parseOutcomeContext(JSON.parse(raw), path);
+}
+async function outcomeContextFromEnvironment(env = process.env) {
+  const path = env[ADVERSARY_OUTCOME_CONTEXT_ENV]?.trim();
+  return path ? openOutcomeContext(path) : null;
+}
+function parseOutcomeContext(value, source = "value") {
+  if (!isRecord(value) || value.schema_version !== OUTCOME_CONTEXT_SCHEMA_VERSION) {
+    throw new Error(`Invalid outcome context at ${source}: schema_version must be ${OUTCOME_CONTEXT_SCHEMA_VERSION}.`);
+  }
+  assertKeys(value, ["schema_version", "subject", "sources", "intent"], source);
+  if (!isRecord(value.subject)) {
+    throw new Error(`Invalid outcome context at ${source}: subject must be an object.`);
+  }
+  assertKeys(value.subject, ["provider", "repository", "pull_request"], `${source}.subject`);
+  if (value.subject.provider !== void 0 && (typeof value.subject.provider !== "string" || characterLength(value.subject.provider) > MAX_PROVIDER_CHARACTERS)) {
+    throw new Error(`Invalid outcome context at ${source}: subject.provider must be a string.`);
+  }
+  if (value.subject.repository !== void 0 && (typeof value.subject.repository !== "string" || characterLength(value.subject.repository) > MAX_REPOSITORY_CHARACTERS)) {
+    throw new Error(`Invalid outcome context at ${source}: subject.repository must be a string.`);
+  }
+  if (!Array.isArray(value.sources) || value.sources.length === 0 || value.sources.length > 2) {
+    throw new Error(`Invalid outcome context at ${source}: sources must contain one or two items.`);
+  }
+  const sources = [];
+  const kinds = /* @__PURE__ */ new Set();
+  for (const item of value.sources) {
+    if (!isRecord(item) || !isSourceKind(item.kind) || typeof item.text !== "string") {
+      throw new Error(`Invalid outcome context at ${source}: each source requires kind and text.`);
+    }
+    assertKeys(item, ["kind", "text"], `${source}.sources`);
+    if (item.text.trim() === "") {
+      throw new Error(`Invalid outcome context at ${source}: source text must not be empty.`);
+    }
+    if (characterLength(item.text) > OUTCOME_CONTEXT_MAX_SOURCE_CHARACTERS) {
+      throw new Error(`Invalid outcome context at ${source}: source text is too long.`);
+    }
+    if (kinds.has(item.kind)) {
+      throw new Error(`Invalid outcome context at ${source}: source kinds must be unique.`);
+    }
+    kinds.add(item.kind);
+    sources.push(Object.freeze({ kind: item.kind, text: item.text }));
+  }
+  const intent = parseIntent(value.intent, source);
+  const pullRequest = value.subject.pull_request;
+  if (pullRequest !== void 0 && (!Number.isInteger(pullRequest) || pullRequest < 1)) {
+    throw new Error(`Invalid outcome context at ${source}: subject.pull_request must be positive.`);
+  }
+  return Object.freeze({
+    schemaVersion: OUTCOME_CONTEXT_SCHEMA_VERSION,
+    subject: Object.freeze({
+      ...typeof value.subject.provider === "string" ? { provider: value.subject.provider } : {},
+      ...typeof value.subject.repository === "string" ? { repository: value.subject.repository } : {},
+      ...typeof pullRequest === "number" ? { pullRequest } : {}
+    }),
+    sources: Object.freeze(sources),
+    intent
+  });
+}
+function parseIntent(value, source) {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid outcome context at ${source}: intent must be an object.`);
+  }
+  assertKeys(value, [
+    "objective",
+    "confidence",
+    "expected_effects",
+    "must_preserve",
+    "affected_boundaries",
+    "ambiguities"
+  ], `${source}.intent`);
+  if (typeof value.objective !== "string" || value.objective.trim() === "" || characterLength(value.objective) > MAX_INTENT_TEXT_CHARACTERS) {
+    throw new Error(`Invalid outcome context at ${source}: intent.objective must not be empty.`);
+  }
+  if (!isConfidence(value.confidence)) {
+    throw new Error(`Invalid outcome context at ${source}: intent.confidence is invalid.`);
+  }
+  return Object.freeze({
+    objective: value.objective,
+    confidence: value.confidence,
+    expectedEffects: parseStringList(value.expected_effects, source, "expected_effects"),
+    mustPreserve: parseStringList(value.must_preserve, source, "must_preserve"),
+    affectedBoundaries: parseStringList(value.affected_boundaries, source, "affected_boundaries"),
+    ambiguities: parseStringList(value.ambiguities, source, "ambiguities")
+  });
+}
+function parseStringList(value, source, field) {
+  if (!Array.isArray(value) || value.length > 12 || value.some((item) => typeof item !== "string" || item.trim() === "" || characterLength(item) > MAX_INTENT_TEXT_CHARACTERS)) {
+    throw new Error(`Invalid outcome context at ${source}: intent.${field} must be a bounded string array.`);
+  }
+  return Object.freeze([...value]);
+}
+function characterLength(value) {
+  return [...value].length;
+}
+function isConfidence(value) {
+  return value === "low" || value === "medium" || value === "high";
+}
+function isSourceKind(value) {
+  return value === "pull_request_title" || value === "pull_request_body";
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function assertKeys(value, allowed, source) {
+  const allowedKeys = new Set(allowed);
+  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unknown !== void 0) {
+    throw new Error(`Invalid outcome context at ${source}: unknown property ${unknown}.`);
+  }
+}
+
+// node_modules/@adversarylabs/sdk/dist/repo-graph.js
+import { readFile as readFile2 } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 var ADVERSARY_REPO_GRAPH_ENV = "ADVERSARY_REPO_GRAPH";
@@ -15150,7 +15276,7 @@ var RepoGraphUnavailableError = class extends Error {
   }
 };
 async function openRepoGraph(dir) {
-  const raw = await readFile(join(dir, "meta.json"), "utf8");
+  const raw = await readFile2(join(dir, "meta.json"), "utf8");
   const meta = JSON.parse(raw);
   if (meta.schemaVersion !== REPO_GRAPH_SCHEMA_VERSION || meta.adapterRevision !== REPO_GRAPH_ADAPTER_REVISION) {
     throw new RepoGraphUnavailableError(`unsupported repo-graph schema ${meta.schemaVersion}/${meta.adapterRevision}`);
@@ -15382,7 +15508,7 @@ function number(value) {
 }
 
 // node_modules/@adversarylabs/sdk/dist/repo-index.js
-import { open, readFile as readFile2 } from "node:fs/promises";
+import { open, readFile as readFile3 } from "node:fs/promises";
 import { join as join2 } from "node:path";
 import { createInterface } from "node:readline";
 var ADVERSARY_REPO_INDEX_ENV = "ADVERSARY_REPO_INDEX";
@@ -15395,7 +15521,7 @@ var RepoIndexUnavailableError = class extends Error {
   }
 };
 async function openRepoIndex(dir) {
-  const metaRaw = await readFile2(join2(dir, "meta.json"), "utf8");
+  const metaRaw = await readFile3(join2(dir, "meta.json"), "utf8");
   const meta = JSON.parse(metaRaw);
   if (meta.schemaVersion !== REPO_INDEX_SCHEMA_VERSION) {
     throw new RepoIndexUnavailableError(`unsupported repo-index schema ${meta.schemaVersion} (want ${REPO_INDEX_SCHEMA_VERSION})`);
@@ -16013,7 +16139,7 @@ function addUsage(total, next) {
 }
 
 // node_modules/@adversarylabs/sdk/dist/sources.js
-import { readFile as readFile3, readdir as readdir2 } from "node:fs/promises";
+import { readFile as readFile4, readdir as readdir2 } from "node:fs/promises";
 import { join as join3 } from "node:path";
 var DEFAULT_IGNORE_DIRECTORIES = Object.freeze([
   ".git",
@@ -16106,7 +16232,7 @@ async function walkRelative(repoPath, ignore) {
 }
 async function safeReadText(absPath, maxBytes) {
   try {
-    const buffer = await readFile3(absPath);
+    const buffer = await readFile4(absPath);
     if (buffer.byteLength > maxBytes)
       return void 0;
     if (buffer.includes(0))
@@ -16282,7 +16408,8 @@ var Adversary = class {
     const change = normalizeChangeContext(options.input.change);
     const repoIndex = options.repoIndex !== void 0 ? options.repoIndex : await repoIndexFromEnvironment();
     const repoGraph = options.repoGraph !== void 0 ? options.repoGraph : await repoGraphFromEnvironment();
-    const context = createRuleContext(repoPath, change, summary, cache, collector, registry, options.model ?? unavailableModel(), repoIndex, repoGraph);
+    const outcomeContext = options.outcomeContext !== void 0 ? options.outcomeContext : await outcomeContextFromEnvironment();
+    const context = createRuleContext(repoPath, change, summary, cache, collector, registry, options.model ?? unavailableModel(), repoIndex, repoGraph, outcomeContext);
     const includeSuppressed = options.includeSuppressed;
     for (const rule of this.rules) {
       log.debug(`running rule ${rule.id}`);
@@ -16308,6 +16435,7 @@ var Adversary = class {
     const result = await this.run({
       input: { ...input, source: { ...input.source, path: repository } },
       model: options.model ?? createModelFromEnvironment(),
+      outcomeContext: options.outcomeContext,
       review: options.review,
       includeSuppressed: options.includeSuppressed ?? parseBooleanEnv(process.env.ADVERSARY_INCLUDE_SUPPRESSED),
       includeRawObservations: options.includeRawObservations,
@@ -16376,19 +16504,19 @@ function toWireEvidence(evidence) {
   });
 }
 async function parseInput(path = DEFAULT_INPUT_PATH) {
-  const raw = await readFile4(path, "utf8");
+  const raw = await readFile5(path, "utf8");
   const parsed = JSON.parse(raw);
-  if (!isRecord(parsed)) {
+  if (!isRecord2(parsed)) {
     throw new Error(`Invalid input at ${path}: expected an object.`);
   }
-  if (!isRecord(parsed.source)) {
+  if (!isRecord2(parsed.source)) {
     throw new Error(`Invalid input at ${path}: source must be an object.`);
   }
   if (typeof parsed.source.path !== "string" || parsed.source.path.length === 0) {
     throw new Error(`Invalid input at ${path}: source.path must be a non-empty string.`);
   }
   if (parsed.change !== void 0 && parsed.change !== null) {
-    if (!isRecord(parsed.change)) {
+    if (!isRecord2(parsed.change)) {
       throw new Error(`Invalid input at ${path}: change must be an object or null.`);
     }
     validateRuntimeChange(parsed.change, path);
@@ -16416,7 +16544,7 @@ function validateRuntimeChange(change, inputPath) {
   }
 }
 function isValidChangedRange(value) {
-  if (!isRecord(value))
+  if (!isRecord2(value))
     return false;
   const { path, startLine, endLine } = value;
   return typeof path === "string" && path.length > 0 && typeof startLine === "number" && Number.isInteger(startLine) && startLine >= 1 && typeof endLine === "number" && Number.isInteger(endLine) && endLine >= startLine;
@@ -16430,7 +16558,7 @@ async function writeOutput(output, path = DEFAULT_OUTPUT_PATH) {
 async function validateRunEnvelope(output) {
   let validator = envelopeValidator;
   if (validator === void 0) {
-    const schema = JSON.parse(await readFile4(new URL("../schemas/adversary.review.v1.schema.json", import.meta.url), "utf8"));
+    const schema = JSON.parse(await readFile5(new URL("../schemas/adversary.review.v1.schema.json", import.meta.url), "utf8"));
     validator = new import__2.Ajv2020({ allErrors: true, strict: true }).compile(schema);
     envelopeValidator = validator;
   }
@@ -16439,7 +16567,7 @@ async function validateRunEnvelope(output) {
   }
 }
 function normalizeConfidence(confidence, thresholds = DEFAULT_CONFIDENCE_THRESHOLDS) {
-  if (isConfidence(confidence)) {
+  if (isConfidence2(confidence)) {
     return confidence;
   }
   if (typeof confidence !== "number" || Number.isNaN(confidence) || confidence < 0 || confidence > 1) {
@@ -16501,11 +16629,12 @@ function freezeChangedRanges(ranges) {
 function normalizeRepositoryPath(path) {
   return path.replaceAll("\\", "/").replace(/^\.\//, "");
 }
-function createRuleContext(repoPath, change, summary, cache, collector, registry, model, repoIndex, repoGraph) {
+function createRuleContext(repoPath, change, summary, cache, collector, registry, model, repoIndex, repoGraph, outcomeContext) {
   const absoluteRepoPath = resolve2(repoPath);
   return {
     repoPath: absoluteRepoPath,
     change,
+    outcomeContext,
     repoIndex,
     repoGraph,
     summary,
@@ -17170,9 +17299,9 @@ function scoreToReviewNote(score) {
   };
 }
 function observationToEvidence(observation) {
-  const data = isRecord(observation.evidence) ? observation.evidence : observation.evidence === void 0 ? void 0 : { evidence: observation.evidence };
-  const message = isRecord(observation.evidence) ? structuredEvidenceMessage(observation.evidence) : stringFromUnknown(observation.evidence);
-  const snippet = isRecord(observation.evidence) ? stringFromUnknown(observation.evidence.snippet) ?? stringFromUnknown(observation.evidence.instruction) : observation.location?.snippet;
+  const data = isRecord2(observation.evidence) ? observation.evidence : observation.evidence === void 0 ? void 0 : { evidence: observation.evidence };
+  const message = isRecord2(observation.evidence) ? structuredEvidenceMessage(observation.evidence) : stringFromUnknown(observation.evidence);
+  const snippet = isRecord2(observation.evidence) ? stringFromUnknown(observation.evidence.snippet) ?? stringFromUnknown(observation.evidence.instruction) : observation.location?.snippet;
   return omitUndefined({
     location: normalizeEvidence(observation.location ?? {}).location,
     label: observation.location?.label ?? message,
@@ -17271,7 +17400,7 @@ function observationTemplateValues(group) {
 function observationValue(observation, field) {
   if (field.includes(".")) {
     return field.split(".").reduce((value, part) => {
-      return isRecord(value) ? value[part] : void 0;
+      return isRecord2(value) ? value[part] : void 0;
     }, observation);
   }
   return observation[field];
@@ -17437,7 +17566,7 @@ function stableStringify(value) {
   if (Array.isArray(value)) {
     return `[${value.map(stableStringify).join(",")}]`;
   }
-  if (isRecord(value)) {
+  if (isRecord2(value)) {
     return `{${Object.keys(value).sort(compareStrings).map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
@@ -17543,7 +17672,7 @@ function assertRuleDefinition(rule) {
   }
 }
 function assertReviewPolicy(policy, source) {
-  if (policy.minimumConfidence !== void 0 && !isConfidence(policy.minimumConfidence)) {
+  if (policy.minimumConfidence !== void 0 && !isConfidence2(policy.minimumConfidence)) {
     throw new Error(`${source}.minimumConfidence must be one of low, medium, high.`);
   }
   if (policy.maximumFindings !== void 0 && (!Number.isInteger(policy.maximumFindings) || policy.maximumFindings < 0)) {
@@ -17564,7 +17693,7 @@ function assertReviewPolicy(policy, source) {
 function optionalRemediation(value, field) {
   if (value === void 0)
     return;
-  if (!isRecord(value))
+  if (!isRecord2(value))
     throw new Error(`${field} must be an object.`);
   if (value.complexity !== void 0 && (typeof value.complexity !== "string" || !["trivial", "small", "medium", "large", "architectural"].includes(value.complexity))) {
     throw new Error(`${field}.complexity is invalid.`);
@@ -17575,7 +17704,7 @@ function requireObservationTitle(value, field) {
     requireString(value, field);
     return;
   }
-  if (!isRecord(value)) {
+  if (!isRecord2(value)) {
     throw new Error(`${field} must be a string or { singular, plural }.`);
   }
   requireString(value.singular, `${field}.singular`);
@@ -17589,7 +17718,7 @@ function optionalObservationSummary(value, field) {
     optionalString(value, field);
     return;
   }
-  if (!isRecord(value)) {
+  if (!isRecord2(value)) {
     throw new Error(`${field} must be a string or { singular, grouped }.`);
   }
   optionalString(value.singular, `${field}.singular`);
@@ -17599,7 +17728,7 @@ function optionalEvidence(value, field) {
   if (value === void 0) {
     return;
   }
-  if (!isRecord(value)) {
+  if (!isRecord2(value)) {
     throw new Error(`${field} must be an object.`);
   }
   const input = value;
@@ -17610,7 +17739,7 @@ function optionalEvidence(value, field) {
   optionalString(value.snippet, `${field}.snippet`);
   optionalString(value.label, `${field}.label`);
   if (value.location !== void 0) {
-    if (!isRecord(value.location)) {
+    if (!isRecord2(value.location)) {
       throw new Error(`${field}.location must be an object.`);
     }
     optionalString(value.location.file, `${field}.location.file`);
@@ -17625,10 +17754,10 @@ function optionalEvidence(value, field) {
   if (endLine !== void 0 && line !== void 0 && endLine < line) {
     throw new Error(`${field}.endLine must not precede line.`);
   }
-  if (value.data !== void 0 && !isRecord(value.data)) {
+  if (value.data !== void 0 && !isRecord2(value.data)) {
     throw new Error(`${field}.data must be an object.`);
   }
-  if (input.metadata !== void 0 && !isRecord(input.metadata)) {
+  if (input.metadata !== void 0 && !isRecord2(input.metadata)) {
     throw new Error(`${field}.metadata must be an object.`);
   }
 }
@@ -17677,7 +17806,7 @@ function optionalPositiveInteger(value, field) {
     throw new Error(`${field} must be a positive integer.`);
   }
 }
-function isConfidence(value) {
+function isConfidence2(value) {
   return value === Confidence.Low || value === Confidence.Medium || value === Confidence.High;
 }
 function isSeverity(value) {
@@ -17686,7 +17815,7 @@ function isSeverity(value) {
 function isNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
-function isRecord(value) {
+function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function stringFromUnknown(value) {
@@ -18144,7 +18273,7 @@ async function loadDeclaredContractSources(ctx, hints) {
     if (info === void 0 || !info.isFile() || info.isSymbolicLink()) continue;
     const actual = await realpath2(requested).catch(() => void 0);
     if (actual === void 0 || actual !== repositoryRoot && !actual.startsWith(repositoryRoot + sep2)) continue;
-    const raw = await readFile5(actual);
+    const raw = await readFile6(actual);
     const bounded = raw.subarray(0, Math.min(raw.length, 24e3, remainingBytes));
     result.push({ path, content: bounded.toString("utf8") });
     remainingBytes -= bounded.length;
